@@ -1,715 +1,539 @@
 <html lang="id">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Spotify Clone - XBreaker</title>
-    <!-- Font Awesome -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
-    <!-- Firebase SDK (modular) -->
-    <script type="module">
-        // Import Firebase modules
-        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js';
-        import { 
-            getAuth, 
-            signInWithEmailAndPassword, 
-            createUserWithEmailAndPassword, 
-            signInWithPopup, 
-            GoogleAuthProvider,
-            signOut,
-            onAuthStateChanged,
-            RecaptchaVerifier,
-            signInWithPhoneNumber
-        } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-auth.js';
-        import { 
-            getFirestore, 
-            doc, setDoc, getDoc, updateDoc, arrayUnion, 
-            collection, query, where, getDocs, addDoc, deleteDoc 
-        } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js';
-
-        // Konfigurasi Firebase Anda (GANTI DENGAN PUNYA ANDA)
-        const firebaseConfig = {
-            apiKey: "YOUR_API_KEY",
-            authDomain: "YOUR_AUTH_DOMAIN",
-            projectId: "YOUR_PROJECT_ID",
-            storageBucket: "YOUR_STORAGE_BUCKET",
-            messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-            appId: "YOUR_APP_ID"
-        };
-
-        // Inisialisasi Firebase
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
-        const provider = new GoogleAuthProvider();
-
-        // ==================== GLOBAL STATE ====================
-        let currentUser = null;
-        let currentView = 'home'; // home, search, koleksi, buat
-        let currentMusicTab = 'all'; // all, podcast (nanti)
-        let allSongs = [];
-        let userPlaylists = [];
-        let currentPlaylist = null;
-        let audioPlayer = new Audio();
-        let currentSongIndex = 0;
-        let isPlaying = false;
-
-        // Data lagu dummy (dengan audio dari SoundHelix)
-        const dummySongs = [
-            { id: 's1', title: 'Viva La Vida', artist: 'Coldplay', cover: 'https://picsum.photos/200/200?random=1', audio: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3' },
-            { id: 's2', title: 'Hacker Anthem', artist: 'XBreaker', cover: 'https://picsum.photos/200/200?random=2', audio: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3' },
-            { id: 's3', title: 'Namu', artist: 'Sable Hills', cover: 'https://picsum.photos/200/200?random=3', audio: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3' },
-            { id: 's4', title: 'Kembali Pulang', artist: 'Radio', cover: 'https://picsum.photos/200/200?random=4', audio: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3' },
-            { id: 's5', title: 'Hits Banget', artist: 'Tulus', cover: 'https://picsum.photos/200/200?random=5', audio: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-5.mp3' },
-            { id: 's6', title: 'Sentimental Journey', artist: 'Various', cover: 'https://picsum.photos/200/200?random=6', audio: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-6.mp3' },
-            { id: 's7', title: 'Blinding Lights', artist: 'The Weeknd', cover: 'https://picsum.photos/200/200?random=7', audio: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-7.mp3' },
-            { id: 's8', title: 'Dynamite', artist: 'BTS', cover: 'https://picsum.photos/200/200?random=8', audio: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3' },
-        ];
-        allSongs = dummySongs;
-
-        // ==================== DOM Elements ====================
-        const appEl = document.getElementById('app');
-        const loginContainer = document.getElementById('login-container');
-        const mainContainer = document.getElementById('main-container');
-        const contentEl = document.getElementById('content');
-        const userPhoto = document.getElementById('user-photo');
-        const userName = document.getElementById('user-name');
-        const profileDropdown = document.getElementById('profile-dropdown');
-        const profileBtn = document.getElementById('profile-btn');
-        const musicTab = document.getElementById('music-tab');
-        const podcastTab = document.getElementById('podcast-tab');
-        const bottomNavItems = document.querySelectorAll('.bottom-nav-item');
-        const playerPlayBtn = document.getElementById('player-play');
-        const playerPrevBtn = document.getElementById('player-prev');
-        playerNextBtn = document.getElementById('player-next');
-        const playerProgress = document.getElementById('player-progress');
-        const playerCurrentTime = document.getElementById('current-time');
-        playerDuration = document.getElementById('duration');
-        const playerTitle = document.getElementById('player-title');
-        const playerArtist = document.getElementById('player-artist');
-        const playerImg = document.getElementById('player-img');
-
-        // ==================== AUTH UI ====================
-        function showLogin() {
-            loginContainer.style.display = 'flex';
-            mainContainer.style.display = 'none';
-            renderAuthTabs();
-        }
-
-        function showMain() {
-            loginContainer.style.display = 'none';
-            mainContainer.style.display = 'flex';
-            loadUserData();
-        }
-
-        function renderAuthTabs() {
-            loginContainer.innerHTML = `
-                <div class="auth-card">
-                    <h1 class="auth-logo">Spotify Clone</h1>
-                    <div class="auth-tabs">
-                        <button class="auth-tab active" id="login-tab">Login</button>
-                        <button class="auth-tab" id="signup-tab">Daftar</button>
-                    </div>
-                    <div id="auth-content"></div>
-                </div>
-            `;
-            document.getElementById('login-tab').addEventListener('click', () => renderLoginForm());
-            document.getElementById('signup-tab').addEventListener('click', () => renderSignupForm());
-            renderLoginForm();
-        }
-
-        function renderLoginForm() {
-            document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('active'));
-            document.getElementById('login-tab').classList.add('active');
-            document.getElementById('auth-content').innerHTML = `
-                <form id="login-form">
-                    <input type="email" id="login-email" placeholder="Email" required>
-                    <input type="password" id="login-password" placeholder="Kata Sandi" required>
-                    <button type="submit" class="auth-btn">Masuk</button>
-                </form>
-                <div class="auth-divider">atau</div>
-                <button id="login-phone" class="auth-btn phone-btn">Masuk dengan Nomor HP</button>
-                <button id="login-google" class="auth-btn google-btn">Masuk dengan Google</button>
-                <div id="recaptcha-container"></div>
-            `;
-            document.getElementById('login-form').addEventListener('submit', async (e) => {
-                e.preventDefault();
-                const email = document.getElementById('login-email').value;
-                const password = document.getElementById('login-password').value;
-                try {
-                    await signInWithEmailAndPassword(auth, email, password);
-                } catch (err) {
-                    alert('Login gagal: ' + err.message);
-                }
-            });
-            document.getElementById('login-google').addEventListener('click', async () => {
-                try {
-                    await signInWithPopup(auth, provider);
-                } catch (err) {
-                    alert('Google login gagal: ' + err.message);
-                }
-            });
-            // Phone login (requires recaptcha)
-            window.recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', { size: 'invisible' });
-            document.getElementById('login-phone').addEventListener('click', () => {
-                const phoneNumber = prompt('Masukkan nomor HP dengan kode negara (contoh: +628123456789)');
-                if (phoneNumber) {
-                    signInWithPhoneNumber(auth, phoneNumber, window.recaptchaVerifier)
-                        .then(confirmationResult => {
-                            const code = prompt('Masukkan kode OTP yang dikirim:');
-                            return confirmationResult.confirm(code);
-                        })
-                        .catch(err => alert('Gagal: ' + err.message));
-                }
-            });
-        }
-
-        function renderSignupForm() {
-            document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('active'));
-            document.getElementById('signup-tab').classList.add('active');
-            document.getElementById('auth-content').innerHTML = `
-                <form id="signup-form">
-                    <input type="email" id="signup-email" placeholder="Email" required>
-                    <input type="password" id="signup-password" placeholder="Kata Sandi" required>
-                    <input type="text" id="signup-phone" placeholder="Nomor HP (opsional)">
-                    <button type="submit" class="auth-btn">Daftar</button>
-                </form>
-                <div class="auth-divider">atau</div>
-                <button id="signup-google" class="auth-btn google-btn">Daftar dengan Google</button>
-                <div id="recaptcha-container2"></div>
-            `;
-            document.getElementById('signup-form').addEventListener('submit', async (e) => {
-                e.preventDefault();
-                const email = document.getElementById('signup-email').value;
-                const password = document.getElementById('signup-password').value;
-                try {
-                    await createUserWithEmailAndPassword(auth, email, password);
-                } catch (err) {
-                    alert('Pendaftaran gagal: ' + err.message);
-                }
-            });
-            document.getElementById('signup-google').addEventListener('click', async () => {
-                try {
-                    await signInWithPopup(auth, provider);
-                } catch (err) {
-                    alert('Google signup gagal: ' + err.message);
-                }
-            });
-        }
-
-        // ==================== USER STATE ====================
-        onAuthStateChanged(auth, async (user) => {
-            if (user) {
-                currentUser = user;
-                await initUserData();
-                showMain();
-                updateProfileUI();
-                loadView(currentView);
-            } else {
-                showLogin();
-            }
-        });
-
-        async function initUserData() {
-            // Buat dokumen pengguna di Firestore jika belum ada
-            const userRef = doc(db, 'users', currentUser.uid);
-            const userSnap = await getDoc(userRef);
-            if (!userSnap.exists()) {
-                await setDoc(userRef, {
-                    email: currentUser.email,
-                    displayName: currentUser.displayName || 'Pengguna',
-                    photoURL: currentUser.photoURL || 'https://picsum.photos/200/200?random=999',
-                    playlists: []
-                });
-            }
-            await loadUserPlaylists();
-        }
-
-        async function loadUserPlaylists() {
-            const playlistsRef = collection(db, 'users', currentUser.uid, 'playlists');
-            const snapshot = await getDocs(playlistsRef);
-            userPlaylists = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        }
-
-        function updateProfileUI() {
-            if (currentUser) {
-                userName.textContent = currentUser.displayName || currentUser.email.split('@')[0];
-                userPhoto.src = currentUser.photoURL || 'https://picsum.photos/200/200?random=999';
-            }
-        }
-
-        // ==================== PROFILE DROPDOWN ====================
-        profileBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            profileDropdown.classList.toggle('show');
-        });
-
-        document.addEventListener('click', (e) => {
-            if (!profileBtn.contains(e.target) && !profileDropdown.contains(e.target)) {
-                profileDropdown.classList.remove('show');
-            }
-        });
-
-        // Settings di dropdown
-        document.getElementById('settings-item').addEventListener('click', () => {
-            profileDropdown.classList.remove('show');
-            showSettings();
-        });
-
-        document.getElementById('logout-item').addEventListener('click', async () => {
-            await signOut(auth);
-        });
-
-        function showSettings() {
-            // Settings panel (sederhana, bisa ditampilkan di area konten)
-            contentEl.innerHTML = `
-                <div style="padding: 32px;">
-                    <h2>Pengaturan</h2>
-                    <p>Fitur settings dapat diubah di sini (simulasi).</p>
-                    <label>Volume: <input type="range" min="0" max="100" value="70" id="settings-volume"></label>
-                    <p>Kualitas Audio: <select><option>Rendah</option><option>Sedang</option><option>Tinggi</option></select></p>
-                    <button onclick="alert('Demo settings')">Simpan</button>
-                </div>
-            `;
-        }
-
-        // ==================== BOTTOM NAVIGATION ====================
-        bottomNavItems.forEach(item => {
-            item.addEventListener('click', () => {
-                bottomNavItems.forEach(i => i.classList.remove('active'));
-                item.classList.add('active');
-                currentView = item.dataset.view;
-                loadView(currentView);
-            });
-        });
-
-        function loadView(view) {
-            if (view === 'home') renderHome();
-            else if (view === 'search') renderSearch();
-            else if (view === 'koleksi') renderKoleksi();
-            else if (view === 'buat') renderBuat();
-        }
-
-        // ==================== RENDER VIEWS ====================
-        function renderHome() {
-            const songsToShow = currentMusicTab === 'music' ? allSongs : allSongs.slice(0, 4); // Podcast dummy
-            contentEl.innerHTML = `
-                <div class="page">
-                    <h2 class="page-title">${currentMusicTab === 'music' ? 'Semua Lagu' : 'Podcast Pilihan'}</h2>
-                    <div class="songs-grid">
-                        ${songsToShow.map(song => `
-                            <div class="song-card" data-song-id="${song.id}">
-                                <img src="${song.cover}" alt="${song.title}">
-                                <h4>${song.title}</h4>
-                                <p>${song.artist}</p>
-                                <button class="play-card-btn" onclick="playSong('${song.id}')"><i class="fas fa-play"></i></button>
-                            </div>
-                        `).join('')}
-                    </div>
-                </div>
-            `;
-        }
-
-        function renderSearch() {
-            contentEl.innerHTML = `
-                <div class="page">
-                    <div class="search-header">
-                        <i class="fas fa-search"></i>
-                        <input type="text" id="search-input" placeholder="Cari lagu, artis, atau podcast" autofocus>
-                        <i class="fas fa-camera" id="camera-icon" style="margin-left: 10px; cursor: pointer;"></i>
-                    </div>
-                    <div id="search-results" class="songs-grid"></div>
-                </div>
-            `;
-            document.getElementById('search-input').addEventListener('input', (e) => {
-                const query = e.target.value.toLowerCase();
-                const results = allSongs.filter(s => s.title.toLowerCase().includes(query) || s.artist.toLowerCase().includes(query));
-                const resultsEl = document.getElementById('search-results');
-                resultsEl.innerHTML = results.map(song => `
-                    <div class="song-card" data-song-id="${song.id}">
-                        <img src="${song.cover}" alt="${song.title}">
-                        <h4>${song.title}</h4>
-                        <p>${song.artist}</p>
-                        <button class="play-card-btn" onclick="playSong('${song.id}')"><i class="fas fa-play"></i></button>
-                    </div>
-                `).join('');
-            });
-            document.getElementById('camera-icon').addEventListener('click', () => {
-                alert('Fitur scan barcode (demo) - Arahkan kamera ke kode Spotify');
-            });
-        }
-
-      function renderKoleksi() {
-            contentEl.innerHTML = `
-                <div class="page">
-                    <h2 class="page-title">Koleksi Kamu</h2>
-                    <button id="new-collection-btn" class="btn-primary"><i class="fas fa-plus"></i> Buat Koleksi Baru</button>
-                    <div id="collections-list" class="collections-grid"></div>
-                </div>
-            `;
-            renderCollections();
-            document.getElementById('new-collection-btn').addEventListener('click', () => {
-                const name = prompt('Nama koleksi:');
-                if (name) createCollection(name);
-            });
-        }
-
-        async function renderCollections() {
-            await loadUserPlaylists();
-            const listEl = document.getElementById('collections-list');
-            listEl.innerHTML = userPlaylists.map(pl => `
-                <div class="collection-card" data-id="${pl.id}">
-                    <img src="https://picsum.photos/200/200?random=${pl.id}" alt="">
-                    <h4>${pl.name}</h4>
-                    <p>${pl.songs?.length || 0} lagu</p>
-                    <button onclick="viewCollection('${pl.id}')">Lihat</button>
-                </div>
-            `).join('');
-        }
-
-        window.viewCollection = async (playlistId) => {
-            const playlist = userPlaylists.find(p => p.id === playlistId);
-            if (!playlist) return;
-            contentEl.innerHTML = `
-                <div class="page">
-                    <button onclick="renderKoleksi()" class="back-btn"><i class="fas fa-arrow-left"></i> Kembali</button>
-                    <h2>${playlist.name}</h2>
-                    <p>${playlist.songs?.length || 0} lagu</p>
-                    <div class="songs-grid" id="collection-songs"></div>
-                </div>
-            `;
-            const songsEl = document.getElementById('collection-songs');
-            if (playlist.songs && playlist.songs.length) {
-                songsEl.innerHTML = playlist.songs.map(songId => {
-                    const song = allSongs.find(s => s.id === songId);
-                    return song ? `
-                        <div class="song-card">
-                            <img src="${song.cover}" alt="">
-                            <h4>${song.title}</h4>
-                            <p>${song.artist}</p>
-                            <button class="play-card-btn" onclick="playSong('${song.id}')"><i class="fas fa-play"></i></button>
-                        </div>
-                    ` : '';
-                }).join('');
-            } else {
-                songsEl.innerHTML = '<p>Belum ada lagu. Tambah dari halaman Home.</p>';
-            }
-        };
-
-        async function createCollection(name) {
-            const playlistsRef = collection(db, 'users', currentUser.uid, 'playlists');
-            await addDoc(playlistsRef, { name, songs: [], collaborative: false, blend: false });
-            await loadUserPlaylists();
-            renderCollections();
-        }
-
-        function renderBuat() {
-            contentEl.innerHTML = `
-                <div class="page">
-                    <h2 class="page-title">Buat Playlist</h2>
-                    <form id="create-playlist-form">
-                        <input type="text" id="playlist-name" placeholder="Nama Playlist" required>
-                        <label><input type="checkbox" id="collab-check"> Playlist Kolaboratif</label>
-                        <label><input type="checkbox" id="blend-check"> Blend</label>
-                        <button type="submit" class="btn-primary">Buat</button>
-                    </form>
-                </div>
-            `;
-            document.getElementById('create-playlist-form').addEventListener('submit', async (e) => {
-                e.preventDefault();
-                const name = document.getElementById('playlist-name').value;
-                const collab = document.getElementById('collab-check').checked;
-                const blend = document.getElementById('blend-check').checked;
-                const playlistsRef = collection(db, 'users', currentUser.uid, 'playlists');
-                await addDoc(playlistsRef, { name, songs: [], collaborative: collab, blend });
-                await loadUserPlaylists();
-                alert('Playlist dibuat!');
-                currentView = 'koleksi';
-                loadView('koleksi');
-                // update bottom nav active
-                bottomNavItems.forEach(i => i.classList.remove('active'));
-                document.querySelector('[data-view="koleksi"]').classList.add('active');
-            });
-        }
-
-        // ==================== MUSIC / PODCAST TABS ====================
-        musicTab.addEventListener('click', () => {
-            musicTab.classList.add('active');
-            podcastTab.classList.remove('active');
-            currentMusicTab = 'music';
-            if (currentView === 'home') renderHome();
-        });
-        podcastTab.addEventListener('click', () => {
-            podcastTab.classList.add('active');
-            musicTab.classList.remove('active');
-            currentMusicTab = 'podcast';
-            if (currentView === 'home') renderHome();
-        });
-
-        // ==================== AUDIO PLAYER ====================
-        window.playSong = (songId) => {
-            const song = allSongs.find(s => s.id === songId);
-            if (!song) return;
-            currentSongIndex = allSongs.findIndex(s => s.id === songId);
-            audioPlayer.src = song.audio;
-            audioPlayer.play();
-            isPlaying = true;
-            updatePlayerUI(song);
-            playerPlayBtn.innerHTML = '<i class="fas fa-pause-circle"></i>';
-        };
-
-        function updatePlayerUI(song) {
-            playerTitle.textContent = song.title;
-            playerArtist.textContent = song.artist;
-            playerImg.src = song.cover;
-        }
-
-        audioPlayer.addEventListener('timeupdate', () => {
-            const progress = (audioPlayer.currentTime / audioPlayer.duration) * 100 || 0;
-            playerProgress.style.width = progress + '%';
-            playerCurrentTime.textContent = formatTime(audioPlayer.currentTime);
-            playerDuration.textContent = formatTime(audioPlayer.duration);
-        });
-
-        audioPlayer.addEventListener('ended', () => {
-            // next song
-            if (currentSongIndex < allSongs.length - 1) {
-                playSong(allSongs[currentSongIndex + 1].id);
-            }
-        });
-
-        playerPlayBtn.addEventListener('click', () => {
-            if (isPlaying) {
-                audioPlayer.pause();
-                playerPlayBtn.innerHTML = '<i class="fas fa-play-circle"></i>';
-            } else {
-                audioPlayer.play();
-                playerPlayBtn.innerHTML = '<i class="fas fa-pause-circle"></i>';
-            }
-            isPlaying = !isPlaying;
-        });
-
-        playerPrevBtn.addEventListener('click', () => {
-            if (currentSongIndex > 0) {
-                playSong(allSongs[currentSongIndex - 1].id);
-            }
-        });
-
-        playerNextBtn.addEventListener('click', () => {
-            if (currentSongIndex < allSongs.length - 1) {
-                playSong(allSongs[currentSongIndex + 1].id);
-            }
-        });
-
-        document.getElementById('player-progress-container').addEventListener('click', (e) => {
-            const rect = e.currentTarget.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const width = rect.width;
-            const percentage = x / width;
-            audioPlayer.currentTime = percentage * audioPlayer.duration;
-        });
-
-        function formatTime(seconds) {
-            if (isNaN(seconds)) return '0:00';
-            const mins = Math.floor(seconds / 60);
-            const secs = Math.floor(seconds % 60);
-            return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
-        }
-
-        // Volume control
-        document.getElementById('volume-slider').addEventListener('click', (e) => {
-            const rect = e.currentTarget.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const width = rect.width;
-            const vol = x / width;
-            audioPlayer.volume = vol;
-            document.getElementById('volume-fill').style.width = vol * 100 + '%';
-        });
-
-        document.getElementById('volume-icon').addEventListener('click', () => {
-            if (audioPlayer.volume > 0) {
-                audioPlayer.volume = 0;
-                document.getElementById('volume-fill').style.width = '0%';
-            } else {
-                audioPlayer.volume = 0.7;
-                document.getElementById('volume-fill').style.width = '70%';
-            }
-        });
-
-        // ==================== INIT ====================
-        window.onload = () => {
-            // Render awal
-        };
-    </script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Spotify Clone</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-        body { background: #000; color: #fff; overflow: hidden; height: 100vh; }
-        #app { height: 100%; display: flex; flex-direction: column; }
-        /* Login */
-        #login-container { display: flex; align-items: center; justify-content: center; height: 100%; background: linear-gradient(180deg, #1a1a1a, #000); }
-        .auth-card { width: 400px; background: #121212; padding: 32px; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
-        .auth-logo { text-align: center; color: #1ed760; margin-bottom: 24px; }
-        .auth-tabs { display: flex; margin-bottom: 24px; border-bottom: 1px solid #282828; }
-        .auth-tab { flex: 1; background: none; border: none; color: #b3b3b3; padding: 12px; cursor: pointer; font-weight: 600; }
-        .auth-tab.active { color: #fff; border-bottom: 2px solid #1ed760; }
-        #auth-content input { width: 100%; padding: 12px; margin-bottom: 16px; background: #282828; border: none; border-radius: 4px; color: #fff; }
-        .auth-btn { width: 100%; padding: 12px; background: #1ed760; border: none; border-radius: 30px; font-weight: 600; cursor: pointer; margin-bottom: 12px; }
-        .auth-divider { text-align: center; color: #b3b3b3; margin: 16px 0; }
-        .google-btn { background: #4285f4; color: #fff; }
-        .phone-btn { background: #0f0f0f; color: #fff; border: 1px solid #535353; }
-        /* Main */
-        #main-container { display: none; flex-direction: column; height: 100%; }
-        /* Top Bar */
-        .top-bar { display: flex; justify-content: space-between; align-items: center; padding: 16px 32px; background: #000; border-bottom: 1px solid #282828; }
-        .top-left { display: flex; gap: 16px; }
-        .nav-arrows { display: flex; gap: 16px; }
-        .arrow-btn { width: 32px; height: 32px; background: #0f0f0f; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; }
-        .top-center { display: flex; gap: 32px; }
-        .top-center span { color: #b3b3b3; cursor: pointer; padding-bottom: 4px; }
-        .top-center span.active { color: #fff; border-bottom: 2px solid #1ed760; }
-        .profile-menu { position: relative; }
-        .profile-btn { display: flex; align-items: center; gap: 8px; background: #0f0f0f; padding: 4px 12px 4px 4px; border-radius: 20px; cursor: pointer; }
-        .profile-btn img { width: 28px; height: 28px; border-radius: 50%; }
-        .profile-dropdown { position: absolute; top: 50px; right: 0; width: 240px; background: #282828; border-radius: 4px; box-shadow: 0 8px 16px rgba(0,0,0,0.3); display: none; z-index: 100; }
-        .profile-dropdown.show { display: block; }
-        .dropdown-item { padding: 12px 16px; color: #b3b3b3; cursor: pointer; }
-        .dropdown-item:hover { background: #3e3e3e; color: #fff; }
-        /* Bottom Bar */
-        .bottom-bar { display: flex; justify-content: space-around; align-items: center; padding: 8px 0; background: #121212; border-top: 1px solid #282828; }
-        .bottom-nav-item { display: flex; flex-direction: column; align-items: center; color: #b3b3b3; cursor: pointer; font-size: 12px; }
-        .bottom-nav-item i { font-size: 20px; margin-bottom: 4px; }
-        .bottom-nav-item.active { color: #1ed760; }
-        /* Content */
-        .content { flex: 1; overflow-y: auto; background: linear-gradient(180deg, #1f1f1f 0%, #121212 100%); padding: 24px 32px; }
-        .page-title { font-size: 28px; margin-bottom: 24px; }
-        .songs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 20px; }
-        .song-card { background: #181818; padding: 16px; border-radius: 6px; transition: 0.3s; cursor: pointer; position: relative; }
-        .song-card:hover { background: #282828; }
-        .song-card img { width: 100%; aspect-ratio: 1; border-radius: 4px; margin-bottom: 12px; object-fit: cover; }
-        .song-card h4 { font-size: 14px; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .song-card p { color: #b3b3b3; font-size: 12px; }
-        .play-card-btn { position: absolute; bottom: 70px; right: 12px; width: 40px; height: 40px; border-radius: 50%; background: #1ed760; border: none; color: #000; opacity: 0; transition: 0.3s; cursor: pointer; }
-        .song-card:hover .play-card-btn { opacity: 1; transform: translateY(-8px); }
-        /* Search */
-        .search-header { display: flex; align-items: center; background: #282828; padding: 8px 16px; border-radius: 30px; margin-bottom: 24px; }
-        .search-header i { color: #b3b3b3; margin-right: 8px; }
-        .search-header input { background: none; border: none; color: #fff; flex: 1; outline: none; }
-        /* Collections */
-        .collections-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 20px; margin-top: 20px; }
-        .collection-card { background: #181818; padding: 16px; border-radius: 6px; }
-        .collection-card img { width: 100%; aspect-ratio: 1; border-radius: 4px; margin-bottom: 8px; }
-        .btn-primary { background: #1ed760; color: #000; border: none; padding: 10px 20px; border-radius: 30px; font-weight: 600; cursor: pointer; }
-        /* Player */
-        .player { height: 90px; background: #181818; border-top: 1px solid #282828; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; }
-        .player-left { display: flex; align-items: center; width: 30%; }
-        .player-left img { width: 56px; height: 56px; border-radius: 4px; margin-right: 12px; }
-        .player-center { width: 40%; display: flex; flex-direction: column; align-items: center; }
-        .player-controls { display: flex; gap: 16px; margin-bottom: 8px; }
-        .player-controls i { color: #b3b3b3; cursor: pointer; font-size: 16px; }
-        .player-controls i:nth-child(3) { color: #fff; font-size: 32px; }
-        .player-progress-container { width: 100%; display: flex; align-items: center; gap: 8px; }
-        .progress-bar { flex: 1; height: 4px; background: #535353; border-radius: 2px; cursor: pointer; }
-        .progress-fill { height: 4px; background: #1ed760; border-radius: 2px; width: 0; }
-        .player-right { width: 30%; display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
-        .volume-bar { width: 80px; height: 4px; background: #535353; border-radius: 2px; cursor: pointer; }
-        .volume-fill { height: 4px; background: #b3b3b3; border-radius: 2px; width: 70%; }
-        /* Utility */
-        .back-btn { background: none; border: none; color: #b3b3b3; cursor: pointer; margin-bottom: 16px; }
+        :root {
+            --spotify-green: #1DB954;
+            --spotify-black: #121212;
+            --adaptive-bg: #121212;
+        }
+
+        body {
+            font-family: 'Montserrat', sans-serif;
+            background-color: var(--spotify-black);
+            color: #fff;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        #splash-screen {
+            position: fixed;
+            inset: 0;
+            background: #000;
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: opacity 0.8s ease;
+        }
+
+        .pulse-logo {
+            width: 100px;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 0.8; }
+            50% { transform: scale(1.1); opacity: 1; }
+            100% { transform: scale(1); opacity: 0.8; }
+        }
+
+        #gateway-screen {
+            position: fixed;
+            inset: 0;
+            z-index: 1000;
+            display: none;
+        }
+
+        .video-bg {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            filter: brightness(0.4);
+        }
+
+        .glass-nav {
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+        }
+
+        .adaptive-bg {
+            background: linear-gradient(to bottom, var(--adaptive-bg) 0%, #121212 100%);
+            transition: background 1.5s ease;
+        }
+
+        .lyrics-container {
+            scroll-behavior: smooth;
+            mask-image: linear-gradient(transparent, black 20%, black 80%, transparent);
+        }
+
+        .lyric-line {
+            font-size: 1.8rem;
+            font-weight: 800;
+            opacity: 0.3;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            line-height: 1.4;
+        }
+
+        .lyric-line.active {
+            opacity: 1;
+            transform: scale(1.05);
+            color: #fff;
+        }
+
+        #now-playing-full {
+            position: fixed;
+            top: 100%;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2000;
+            background: #121212;
+            transition: top 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        #now-playing-full.open { top: 0; }
+
+        .canvas-video {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            opacity: 0.3;
+            pointer-events: none;
+        }
+
+        .custom-scroll::-webkit-scrollbar { width: 5px; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 10px; }
     </style>
 </head>
 <body>
-    <div id="app">
-        <!-- Login Container (akan diisi JS) -->
-        <div id="login-container"></div>
 
-     <!-- Main Container -->
-        <div id="main-container">
-            <!-- Top Bar -->
-            <div class="top-bar">
-                <div class="top-left">
-                    <div class="nav-arrows">
-                        <div class="arrow-btn"><i class="fas fa-chevron-left"></i></div>
-                        <div class="arrow-btn"><i class="fas fa-chevron-right"></i></div>
-                    </div>
+    <div id="splash-screen">
+        <img src="https://upload.wikimedia.org/wikipedia/commons/1/19/Spotify_logo_without_text.svg" class="pulse-logo" alt="Spotify">
+    </div>
+    <div id="gateway-screen" class="flex flex-col">
+        <video class="video-bg" autoplay muted loop playsinline>
+            <source src="https://assets.mixkit.co/videos/preview/mixkit-young-man-listening-to-music-on-headphones-4412-large.mp4" type="video/mp4">
+        </video>
+        <div class="absolute inset-0 flex flex-col items-center justify-end p-10 pb-20 text-center space-y-6">
+            <img src="https://upload.wikimedia.org/wikipedia/commons/2/26/Spotify_logo_with_text.svg" class="w-40 mb-4">
+            <h1 class="text-4xl font-extrabold">Millions of songs.<br>Free on Spotify.</h1>
+            <div class="w-full space-y-3">
+                <button onclick="showAuth('register')" class="w-full bg-[#1DB954] text-black font-extrabold py-4 rounded-full text-lg">Sign Up Free</button>
+                <button id="google-login" class="w-full bg-transparent border border-gray-500 py-3 rounded-full font-bold flex items-center justify-center gap-3">
+                    <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" class="w-5"> Continue with Google
+                </button>
+                <button onclick="showAuth('login')" class="w-full text-white font-bold py-2">Log In</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="auth-modal" class="fixed inset-0 z-[3000] bg-black hidden flex-col p-6">
+        <button onclick="hideAuth()" class="self-start text-2xl mb-10"><i class="fa-solid fa-xmark"></i></button>
+        <div id="auth-content" class="max-w-md mx-auto w-full space-y-8">
+            <h2 id="auth-title" class="text-3xl font-extrabold">Log In</h2>
+            <div class="space-y-4">
+                <input type="email" id="auth-email" placeholder="Email" class="w-full p-4 bg-[#333] rounded-md border-none outline-none">
+                <input type="password" id="auth-password" placeholder="Password" class="w-full p-4 bg-[#333] rounded-md border-none outline-none">
+                <button id="auth-submit" class="w-full bg-[#1DB954] text-black font-extrabold py-4 rounded-full mt-4">Continue</button>
+            </div>
+            <div class="flex items-center gap-2">
+                <hr class="flex-grow border-gray-800"> <span class="text-xs text-gray-500">OR</span> <hr class="flex-grow border-gray-800">
+            </div>
+            <button id="phone-login-btn" class="w-full bg-white text-black font-extrabold py-3 rounded-full flex items-center justify-center gap-3">
+                <i class="fa-solid fa-mobile-screen"></i> Login with Phone Number
+            </button>
+        </div>
+    </div>
+    <div id="app-interface" class="hidden h-screen flex flex-col">
+        <header class="h-16 flex items-center justify-between px-4 z-50">
+            <div class="flex items-center gap-3">
+                <button id="profile-img-btn" class="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center font-bold text-sm">G</button>
+                <div class="flex gap-2">
+                    <button class="px-4 py-1.5 rounded-full bg-white text-black font-bold text-xs">Semua</button>
+                    <button class="px-4 py-1.5 rounded-full bg-[#2a2a2a] text-white font-bold text-xs">Musik</button>
+                    <button class="px-4 py-1.5 rounded-full bg-[#2a2a2a] text-white font-bold text-xs">Podcast</button>
                 </div>
-                <div class="top-center">
-                    <span id="music-tab" class="active">Musik</span>
-                    <span id="podcast-tab">Podcast</span>
+            </div>
+            <div class="flex items-center gap-4 text-xl">
+                <i class="fa-solid fa-bell"></i>
+                <i class="fa-solid fa-clock-rotate-left"></i>
+                <i onclick="switchView('settings')" class="fa-solid fa-gear cursor-pointer"></i>
+            </div>
+        </header>
+
+        <main id="main-view" class="flex-grow overflow-y-auto custom-scroll adaptive-bg pb-32">
+            <div id="view-home" class="p-4 space-y-8">
+                <h2 class="text-2xl font-bold">Selamat Siang</h2>
+                <div id="recently-played" class="grid grid-cols-2 gap-2">
                 </div>
-                <div class="profile-menu">
-                    <div class="profile-btn" id="profile-btn">
-                        <img id="user-photo" src="https://picsum.photos/28/28" alt="user">
-                        <span id="user-name">User</span>
-                        <i class="fas fa-chevron-down"></i>
-                    </div>
-                    <div class="profile-dropdown" id="profile-dropdown">
-                        <div class="dropdown-item" id="settings-item"><i class="fas fa-cog"></i> Pengaturan</div>
-                        <div class="dropdown-item" id="logout-item"><i class="fas fa-sign-out-alt"></i> Logout</div>
-                    </div>
+
+                <h2 class="text-2xl font-bold">Made For You</h2>
+                <div id="made-for-you" class="flex gap-4 overflow-x-auto pb-4 custom-scroll">
+                </div>
+
+                <h2 class="text-2xl font-bold">Spotify wrapped</h2>
+                <div class="w-full aspect-video bg-gradient-to-br from-purple-600 to-pink-500 rounded-lg p-6 relative overflow-hidden shadow-2xl">
+                    <h3 class="text-3xl font-black italic">Your Year<br>Wrapped</h3>
+                    <button class="absolute bottom-4 left-4 bg-white text-black px-6 py-2 rounded-full font-bold text-sm">Check it out</button>
                 </div>
             </div>
 
-                      <!-- Main Content -->
-            <div class="content" id="content"></div>
-
-            <!-- Bottom Navigation -->
-            <div class="bottom-bar">
-                <div class="bottom-nav-item active" data-view="home">
-                    <i class="fas fa-home"></i>
-                    <span>Home</span>
+            <div id="view-search" class="hidden p-4 space-y-6">
+                <h2 class="text-3xl font-bold mb-4">Cari</h2>
+                <div class="relative">
+                    <i class="fa-solid fa-magnifying-glass absolute left-4 top-1/2 -translate-y-1/2 text-black"></i>
+                    <input type="text" id="search-input" placeholder="Apa yang ingin kamu dengar?" 
+                        class="w-full p-4 pl-12 rounded-lg text-black font-bold outline-none">
+                    <i class="fa-solid fa-microphone absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 text-xl cursor-pointer"></i>
                 </div>
-                <div class="bottom-nav-item" data-view="search">
-                    <i class="fas fa-search"></i>
-                    <span>Pencarian</span>
-                </div>
-                <div class="bottom-nav-item" data-view="koleksi">
-                    <i class="fas fa-list"></i>
-                    <span>Koleksi</span>
-                </div>
-                <div class="bottom-nav-item" data-view="buat">
-                    <i class="fas fa-plus-circle"></i>
-                    <span>Buat</span>
+                <h3 class="font-bold text-lg mt-8">Jelajahi semua</h3>
+                <div id="genre-grid" class="grid grid-cols-2 gap-4">
                 </div>
             </div>
+            <div id="view-settings" class="hidden p-6 space-y-10">
+                <div class="flex items-center gap-4">
+                    <button onclick="switchView('home')" class="text-2xl"><i class="fa-solid fa-arrow-left"></i></button>
+                    <h2 class="text-2xl font-extrabold">Tetapan</h2>
+                </div>
 
-            <!-- Player -->
-            <div class="player">
-                <div class="player-left">
-                    <img id="player-img" src="https://picsum.photos/56/56" alt="">
+                <div class="space-y-6">
                     <div>
-                        <h4 id="player-title">Pilih lagu</h4>
-                        <p id="player-artist">Artist</p>
-                    </div>
-                    <i class="fas fa-heart" style="margin-left: 16px; color: #b3b3b3; cursor: pointer;"></i>
-                </div>
-                <div class="player-center">
-                    <div class="player-controls">
-                        <i class="fas fa-random" id="shuffle"></i>
-                        <i class="fas fa-step-backward" id="player-prev"></i>
-                        <i class="fas fa-play-circle" id="player-play"></i>
-                        <i class="fas fa-step-forward" id="player-next"></i>
-                        <i class="fas fa-repeat" id="repeat"></i>
-                    </div>
-                    <div class="player-progress-container" id="player-progress-container">
-                        <span id="current-time">0:00</span>
-                        <div class="progress-bar">
-                            <div class="progress-fill" id="player-progress"></div>
+                        <h4 class="text-sm font-bold text-gray-400 mb-2 uppercase">Kualiti Audio</h4>
+                        <div class="flex justify-between items-center py-3 border-b border-gray-800">
+                            <p>WiFi Streaming</p>
+                            <select class="bg-transparent border-none font-bold text-green-500"><option>Sangat Tinggi (320kbps)</option></select>
                         </div>
-                        <span id="duration">0:00</span>
+                        <div class="flex justify-between items-center py-3 border-b border-gray-800">
+                            <p>Data Saver</p>
+                            <div class="w-10 h-5 bg-gray-600 rounded-full"></div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <h4 class="text-sm font-bold text-gray-400 mb-2 uppercase">Penyimpanan</h4>
+                        <div class="w-full bg-gray-800 h-1.5 rounded-full mb-2">
+                            <div class="bg-green-500 w-1/4 h-full rounded-full"></div>
+                        </div>
+                        <p class="text-xs text-gray-400">Cache: 240 MB • Tersedia: 12.4 GB</p>
+                        <button onclick="clearCache()" class="mt-4 text-xs font-bold border border-gray-600 px-4 py-2 rounded-full">Hapus Cache</button>
                     </div>
                 </div>
-                <div class="player-right">
-                    <i class="fas fa-list"></i>
-                    <i class="fas fa-volume-high" id="volume-icon"></i>
-                    <div class="volume-bar" id="volume-slider">
-                        <div class="volume-fill" id="volume-fill"></div>
-                    </div>
+            </div>
+        </main>
+
+        <div id="mini-player" class="fixed bottom-[70px] left-2 right-2 glass-nav rounded-lg h-14 flex items-center px-3 z-[100] cursor-pointer shadow-2xl transition-all border border-white/5">
+            <img id="mini-album-art" src="https://via.placeholder.com/150" class="w-10 h-10 rounded mr-3 shadow-lg">
+            <div class="flex-grow truncate">
+                <p id="mini-title" class="text-sm font-bold truncate">Pilih lagu...</p>
+                <p id="mini-artist" class="text-[10px] text-gray-400 truncate">Selamat datang</p>
+            </div>
+            <div class="flex items-center gap-4 text-lg">
+                <i class="fa-solid fa-laptop-code text-green-500 text-xs mr-2"></i>
+                <i id="mini-play-btn" class="fa-solid fa-play"></i>
+            </div>
+            <div id="mini-progress" class="absolute bottom-0 left-0 h-[2px] bg-white w-0 transition-all"></div>
+        </div>
+
+        <nav class="h-[70px] glass-nav flex items-center justify-around border-t border-white/5 z-[100]">
+            <button onclick="switchView('home')" class="flex flex-col items-center gap-1 text-gray-400 hover:text-white transition">
+                <i class="fa-solid fa-house text-xl"></i>
+                <span class="text-[10px] font-medium">Home</span>
+            </button>
+            <button onclick="switchView('search')" class="flex flex-col items-center gap-1 text-gray-400 hover:text-white transition">
+                <i class="fa-solid fa-magnifying-glass text-xl"></i>
+                <span class="text-[10px] font-medium">Search</span>
+            </button>
+            <button class="flex flex-col items-center gap-1 text-gray-400 hover:text-white transition">
+                <i class="fa-solid fa-lines-leaning text-xl"></i>
+                <span class="text-[10px] font-medium">Library</span>
+            </button>
+        </nav>
+    </div>
+
+    <div id="now-playing-full">
+        <video class="canvas-video" id="canvas-video" autoplay muted loop playsinline src="https://assets.mixkit.co/videos/preview/mixkit-abstract-flowing-particles-204-large.mp4"></video>
+        <header class="h-16 flex items-center justify-between px-6 relative z-10">
+            <i onclick="closePlayer()" class="fa-solid fa-chevron-down text-xl"></i>
+            <div class="text-center">
+                <p class="text-[10px] uppercase font-bold tracking-widest text-gray-300">Playlist</p>
+                <p class="text-xs font-bold">Discover Weekly</p>
+            </div>
+            <i class="fa-solid fa-ellipsis-vertical text-xl"></i>
+        </header>
+
+        <div class="flex-grow flex flex-col p-8 space-y-10 relative z-10">
+            <div id="full-album-art-container" class="w-full aspect-square bg-[#333] rounded-lg shadow-2xl overflow-hidden transition-all duration-700">
+                <img id="full-album-art" src="" class="w-full h-full object-cover">
+            </div>
+
+            <div class="flex justify-between items-center">
+                <div>
+                    <h2 id="full-title" class="text-2xl font-black">Nama Lagu</h2>
+                    <p id="full-artist" class="text-gray-400 font-bold">Artis</p>
+                </div>
+                <i class="fa-regular fa-heart text-2xl"></i>
+            </div>
+
+            <div class="space-y-1">
+                <div id="full-progress-container" class="w-full h-1 bg-white/20 rounded-full relative cursor-pointer">
+                    <div id="full-progress-bar" class="absolute h-full bg-white rounded-full w-0"></div>
+                    <div class="absolute -top-1 right-0 w-3 h-3 bg-white rounded-full hidden"></div>
+                </div>
+                <div class="flex justify-between text-[10px] font-bold text-gray-400">
+                    <span id="time-current">0:00</span>
+                    <span id="time-duration">0:00</span>
+                </div>
+            </div>
+
+            <div class="flex justify-between items-center text-3xl">
+                <i class="fa-solid fa-shuffle text-xl text-green-500"></i>
+                <i class="fa-solid fa-backward-step"></i>
+                <div id="full-play-btn" class="w-20 h-20 bg-white text-black rounded-full flex items-center justify-center">
+                    <i class="fa-solid fa-play ml-1"></i>
+                </div>
+                <i class="fa-solid fa-forward-step"></i>
+                <i class="fa-solid fa-repeat text-xl"></i>
+            </div>
+
+            <div id="lyrics-card" class="bg-white/10 p-6 rounded-2xl h-80 overflow-hidden relative">
+                <div class="flex justify-between items-start mb-4">
+                    <h4 class="font-black text-xl">Lirik</h4>
+                    <button class="bg-white/20 px-3 py-1 rounded-full text-xs font-bold">SHARE</button>
+                </div>
+                <div id="lyrics-scroll" class="lyrics-container h-full overflow-y-auto space-y-4 pb-20 custom-scroll">
                 </div>
             </div>
         </div>
     </div>
-    <script>
-        // The main script is in the module above
+
+    <audio id="audio-player" crossorigin="anonymous"></audio>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, GoogleAuthProvider, signInWithPopup } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyBK-MehTTzURY5jT5stH363Y5_WE4iy-XA",
+            authDomain: "volca-tools.firebaseapp.com",
+            projectId: "volca-tools",
+            storageBucket: "volca-tools.firebasestorage.app",
+            messagingSenderId: "262525907487",
+            appId: "1:262525907487:web:4abc37fa3b583223569b2a",
+            measurementId: "G-Q6W58HE2B3"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const googleProvider = new GoogleAuthProvider();
+        const RAPID_KEY = "922416f582msh690833198089204p121f66jsn52d2074f07e5";
+        const RAPID_HOST = "spotify-downloader9.p.rapidapi.com";
+        let currentTrack = null;
+        let isPlaying = false;
+        const audio = document.getElementById('audio-player');
+
+        window.onload = () => {
+            setTimeout(() => {
+                document.getElementById('splash-screen').style.opacity = '0';
+                setTimeout(() => {
+                    document.getElementById('splash-screen').style.display = 'none';
+                    checkAuthState();
+                }, 800);
+            }, 2000);
+        };
+
+        function checkAuthState() {
+            onAuthStateChanged(auth, (user) => {
+                if (user) {
+                    document.getElementById('gateway-screen').style.display = 'none';
+                    document.getElementById('app-interface').style.display = 'flex';
+                    initApp(user);
+                } else {
+                    document.getElementById('gateway-screen').style.display = 'flex';
+                    document.getElementById('app-interface').style.display = 'none';
+                }
+            });
+        }
+
+        window.showAuth = (mode) => {
+            document.getElementById('auth-modal').style.display = 'flex';
+            document.getElementById('auth-title').innerText = mode === 'login' ? 'Log In' : 'Sign Up';
+        };
+
+        window.hideAuth = () => {
+            document.getElementById('auth-modal').style.display = 'none';
+        };
+
+        document.getElementById('google-login').onclick = async () => {
+            try { await signInWithPopup(auth, googleProvider); } catch(e) { alert(e.message); }
+        };
+
+        document.getElementById('auth-submit').onclick = async () => {
+            const email = document.getElementById('auth-email').value;
+            const pass = document.getElementById('auth-password').value;
+            const mode = document.getElementById('auth-title').innerText;
+            try {
+                if(mode === 'Log In') await signInWithEmailAndPassword(auth, email, pass);
+                else await createUserWithEmailAndPassword(auth, email, pass);
+                hideAuth();
+            } catch(e) { alert(e.message); }
+        };
+
+        window.switchView = (view) => {
+            document.getElementById('view-home').classList.add('hidden');
+            document.getElementById('view-search').classList.add('hidden');
+            document.getElementById('view-settings').classList.add('hidden');
+            document.getElementById(`view-${view}`).classList.remove('hidden');
+        };
+
+        async function spotifySearch(query) {
+            const url = `https://${RAPID_HOST}/search?q=${encodeURIComponent(query)}&type=tracks&limit=10`;
+            const options = { method: 'GET', headers: { 'x-rapidapi-key': RAPID_KEY, 'x-rapidapi-host': RAPID_HOST } };
+            try {
+                const response = await fetch(url, options);
+                return await response.json();
+            } catch (e) { return null; }
+        }
+
+        async function getTrackDownload(id) {
+            const url = `https://${RAPID_HOST}/download?trackId=${id}`;
+            const options = { method: 'GET', headers: { 'x-rapidapi-key': RAPID_KEY, 'x-rapidapi-host': RAPID_HOST } };
+            try {
+                const response = await fetch(url, options);
+                return await response.json();
+            } catch (e) { return null; }
+        }
+
+        async function playTrack(track) {
+            currentTrack = track;
+            document.getElementById('mini-title').innerText = track.name;
+            document.getElementById('mini-artist').innerText = track.artists[0].name;
+            document.getElementById('mini-album-art').src = track.album.images[0].url;
+
+            document.getElementById('full-title').innerText = track.name;
+            document.getElementById('full-artist').innerText = track.artists[0].name;
+            document.getElementById('full-album-art').src = track.album.images[0].url;
+            
+            const color = `hsl(${Math.random() * 360}, 60%, 20%)`;
+            document.documentElement.style.setProperty('--adaptive-bg', color);
+            const data = await getTrackDownload(track.id);
+            if(data && data.status && data.data.download_link) {
+                audio.src = data.data.download_link;
+                audio.play();
+                isPlaying = true;
+                updatePlayIcons();
+                loadLyrics(track.name);
+            } else {
+                alert("Maaf, lagu ini tidak dapat diputar karena batasan API.");
+            }
+        }
+
+        function updatePlayIcons() {
+            const icons = [document.getElementById('mini-play-btn'), document.getElementById('full-play-btn').querySelector('i')];
+            icons.forEach(icon => {
+                icon.className = isPlaying ? 'fa-solid fa-pause' : 'fa-solid fa-play ml-1';
+            });
+        }
+
+        document.getElementById('search-input').onkeypress = async (e) => {
+            if(e.key === 'Enter') {
+                const results = await spotifySearch(e.target.value);
+                if(results && results.status) {
+                    const grid = document.getElementById('genre-grid');
+                    grid.innerHTML = '';
+                    results.data.items.forEach(track => {
+                        const card = document.createElement('div');
+                        card.className = "bg-[#282828] p-4 rounded-lg flex items-center gap-4 cursor-pointer hover:bg-[#333] transition";
+                        card.innerHTML = `<img src="${track.album.images[0].url}" class="w-12 h-12 rounded"><div class="truncate"><p class="font-bold truncate">${track.name}</p><p class="text-xs text-gray-400 truncate">${track.artists[0].name}</p></div>`;
+                        card.onclick = () => playTrack(track);
+                        grid.appendChild(card);
+                    });
+                }
+            }
+        };
+        
+        document.getElementById('mini-player').onclick = () => {
+            document.getElementById('now-playing-full').classList.add('open');
+        };
+
+        window.closePlayer = () => {
+            document.getElementById('now-playing-full').classList.remove('open');
+        };
+
+        document.getElementById('mini-play-btn').onclick = (e) => {
+            e.stopPropagation();
+            if(isPlaying) audio.pause(); else audio.play();
+            isPlaying = !isPlaying;
+            updatePlayIcons();
+        };
+
+        document.getElementById('full-play-btn').onclick = () => {
+            if(isPlaying) audio.pause(); else audio.play();
+            isPlaying = !isPlaying;
+            updatePlayIcons();
+        };
+    
+        function loadLyrics(title) {
+            const container = document.getElementById('lyrics-scroll');
+            container.innerHTML = '';
+    
+            const lines = ["Lirik sedang dimuat...", "Merasakan setiap nada...", title + " menggema di telinga.", "Nikmati kualitas 320kbps.", "Spotify Pro Clone by VOLCA.", "Lirik akan bergerak sesuai lagu."];
+            lines.forEach((l, i) => {
+                const div = document.createElement('p');
+                div.className = "lyric-line " + (i === 0 ? 'active' : '');
+                div.innerText = l;
+                container.appendChild(div);
+            });
+        }
+
+        audio.ontimeupdate = () => {
+            const perc = (audio.currentTime / audio.duration) * 100;
+            document.getElementById('mini-progress').style.width = perc + '%';
+            document.getElementById('full-progress-bar').style.width = perc + '%';
+            document.getElementById('time-current').innerText = formatTime(audio.currentTime);
+            document.getElementById('time-duration').innerText = formatTime(audio.duration || 0);
+        
+            const lines = document.querySelectorAll('.lyric-line');
+            const index = Math.floor((audio.currentTime / audio.duration) * lines.length);
+            lines.forEach((l, i) => {
+                l.classList.toggle('active', i === index);
+                if(i === index) l.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            });
+        };
+
+        function formatTime(s) {
+            const m = Math.floor(s / 60);
+            const sec = Math.floor(s % 60);
+            return `${m}:${sec < 10 ? '0' : ''}${sec}`;
+        }
+
+        function initApp(user) {
+            const recently = document.getElementById('recently-played');
+            recently.innerHTML = '';
+            ["Top Hits Indonesia", "Daily Mix 1", "Discover Weekly", "Made For You"].forEach(p => {
+                const card = document.createElement('div');
+                card.className = "bg-[#282828] flex items-center rounded overflow-hidden h-14 cursor-pointer hover:bg-[#3e3e3e]";
+                card.innerHTML = `<div class="w-14 h-full bg-gradient-to-br from-green-400 to-blue-600"></div><p class="px-3 text-xs font-bold">${p}</p>`;
+                recently.appendChild(card);
+            });
+        }
+
+        window.clearCache = () => {
+            alert("Cache berhasil dihapus.");
+        };
+
     </script>
 </body>
 </html>
-      
